@@ -18,13 +18,15 @@ Configuración rápida:
   * Cambios a realizar en Postfix:
 
 En master.cf añadimos lo siguiente:
+```
 ---------------------------------8<--------------------------------
 ufc       unix  -       n       n       -       0       spawn
   user=nobody argv=/opt/ccti/correo/ufc.py
 ---------------------------------8<--------------------------------
+```
 
-En main.cf editamos la opción smtpd_recipient_restrictions para que incluya "check_policy_service unix:private/ufc".
-Ejemplo:
+En main.cf editamos la opción smtpd_recipient_restrictions para que incluya "check_policy_service unix:private/ufc". Ejemplo:
+```
 ---------------------------------8<--------------------------------
 smtpd_recipient_restrictions =
    check_policy_service unix:private/ufc
@@ -33,10 +35,11 @@ smtpd_recipient_restrictions =
    permit_mynetworks
    reject_unauth_destination
 ---------------------------------8<--------------------------------
-
-  * Por último, añadimos una tarea en cron para que limpie la base de datos periódicamente, ejemplo:
+```
+Por último, añadimos una tarea en cron para que limpie la base de datos periódicamente, ejemplo:
+```
 ---------------------------------8<--------------------------------
 # Eliminamos la base de datos del accounting de los correos enviados por los usuarios
 15 * * * * /opt/ccti/correo/ufc.py -p >> /var/log/ufc.log 2>&1
 ---------------------------------8<--------------------------------
-
+```
