@@ -13,12 +13,12 @@ def fatal_error(msg = None):
     sys.exit(0)
 
 def sendMail(subject, body, smtp_server, tls_required, recipients, sender):
+    log.debug('Enviando correo a %s' % recipients)
+    msg = 'Subject: %s\r\n%s' % (subject, body)
+
     session = smtplib.SMTP(smtp_server)
     if tls_required:
         session.starttls()
-
-    log.debug('Enviando correo a %s' % recipients)
-    msg = 'Subject: %s\r\n%s' % (subject, body)
     smtpresult = session.sendmail(sender, recipients, msg)
     if smtpresult:
         errstr = ""

@@ -35,7 +35,6 @@ class UFC():
     smtp_server = 'localhost'
     recipients = ['root', ]
     fqdn = socket.getfqdn()
-    sender = 'ufc@%s' % fqdn
     tls_required = True
 
     def __init__(self, verbose = False, interactive = False):
@@ -45,8 +44,8 @@ class UFC():
         except IOError:
             fatal_error(u'Error leyendo la configuración')
 
-        log_filename = self.get_config(config, 'log', 'filename')
-        log.addHandler(logging.FileHandler(log_filename))
+        #log_filename = self.get_config(config, 'log', 'filename')
+        #log.addHandler(logging.FileHandler(log_filename))
         if verbose:
             log.setLevel(logging.DEBUG)
 
@@ -86,7 +85,7 @@ class UFC():
             fatal_error('Error: %s' % e)
 
     def append_to_log(self, stdin_lines):
-        request_dict = dict([line.strip().split('=', 1) for line in stdin_lines if line])
+        request_dict = dict([line.split('=', 1) for line in stdin_lines if line])
 
         for attrib in ('recipient_count', 'size', 'encryption_keysize'):
             try:
@@ -126,12 +125,12 @@ class UFC():
                     self.smtp_server,
                     self.tls_required,
                     self.recipients,
-                    self.sender
+                    sender
                 )
                 action = 'HOLD bloqueado por el control de flujo. Demasiados mensajes enviados en los ultimos %s segundos.' % self.max_time
                 log.warn("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
                     (sender, sended_emails, self.max_time))
-        print "action=%s\n\n" % action
+        return action
 
     def purge(self):
         log.info("Expirando entradas antiguas en el Log")
@@ -147,20 +146,24 @@ class UFC():
             line += c
         return line.strip()
 
-    def process(self):
+    def read_lines_from_stdin(self):
         lines = []
+        while True:
+            line = self.read_line_from_stdin()
+            log.debug("Stdin: %s" % line)
+            if line == "":
+                break
+            lines.append(line)
+        return lines
+
+    def process(self):
         if self.interactive:
-            while True:
-                line = self.read_line_from_stdin()
-                log.debug("Stdin: %s" % line)
-                if line == "":
-                    break
-                lines.append(line)
+            lines = self.read_lines_from_stdin()
+            request = self.append_to_log(lines)
+            print "action=%s\n" % self.check_limits(request)
         else:
-            # TODO: Abrir socket
-            pass
-        request = self.append_to_log(lines)
-        self.check_limits(request)
+            import server
+            server.start(self)
 
 def main(options, interactive = False):
     ufc = UFC(options.verbose, interactive)
