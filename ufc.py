@@ -17,7 +17,7 @@ from optparse import OptionParser
 from cStringIO import StringIO
 import traceback
 from sqlobject import sqlhub, connectionForURI
-from models import Log, Ban
+from models import Log, Ban, OR
 from utils import fatal_error, sendMail
 
 import logging
@@ -28,6 +28,11 @@ syslog = SysLogHandler('/dev/log', facility = SysLogHandler.LOG_MAIL)
 syslog.setFormatter(logging.Formatter('%(name)s: %(levelname)s %(message)s'))
 log.addHandler(syslog)
 
+mail_tpl = """
+El usuario %s ha pretendido enviar en %s segundos más de %s mensajes.
+La actividad se ha detectado en la máquina %s.
+"""
+
 class UFC():
     "ULL Flow Control"
 
@@ -36,6 +41,8 @@ class UFC():
     recipients = ['root', ]
     fqdn = socket.getfqdn()
     tls_required = True
+
+    hold = 'HOLD bloqueado por el control de flujo.'
 
     def __init__(self, verbose = False, interactive = False):
         config = ConfigParser.ConfigParser()
@@ -84,26 +91,56 @@ class UFC():
                 return default
             fatal_error('Error: %s' % e)
 
-    def append_to_log(self, stdin_lines):
-        request_dict = dict([line.split('=', 1) for line in stdin_lines if line])
-
+    def append_to_log(self, request):
         for attrib in ('recipient_count', 'size', 'encryption_keysize'):
-            try:
-                if request_dict[attrib] is not None:
-                    request_dict[attrib] = int(request_dict[attrib])
-            except KeyError, e:
-                fatal_error('Error parseando la entrada %s: %s' % (attrib, e))
+            if request[attrib] is not None:
+                request[attrib] = int(request[attrib])
 
-        request_dict['request_time'] = datetime.datetime.now()
-        request_dict['expiresAt'] = request_dict['request_time'] + datetime.timedelta(weeks=1)
+        request['request_time'] = datetime.datetime.now()
+        request['expiresAt'] = request['request_time'] + datetime.timedelta(weeks=1)
 
         log.info(u"[%s] - %s - %s => %s" % (
-            request_dict['request_time'], request_dict['client_address'], \
-            request_dict['sender'], request_dict['recipient']))
+            request['request_time'], request['client_address'], \
+            request['sender'], request['recipient']))
 
-        Log(**request_dict)
+        return Log(**request)
 
-        return request_dict
+    def is_banned(self, user):
+        bans = Ban.select(Log.q.sender == user).\
+            filter(OR(Ban.q.expires_at == None, Ban.q.expires_at > datetime.datetime.now()))
+        if not bans.count():
+            return False
+        return bans
+
+    def ban_user(self, user):
+        Ban(
+            sender = user,
+            created = datetime.datetime.now(),
+            host = self.fqdn
+            )
+        sendMail(
+            'Bloqueado el envío de correo del usuario %s' % user,
+            mail_tpl % (user, self.max_time, self.max_email, self.fqdn),
+            self.smtp_server,
+            self.tls_required,
+            self.recipients,
+            user
+        )
+
+    def unban_user(self, user):
+        bans = self.is_banned(user)
+        if not bans:
+            log.warning("The user %s doesn't have bans to release" % user)
+        else:
+            log.info("Releasing %s bans for user %s" % (bans.count(), user))
+            for b in bans:
+                b.expires_at = datetime.datetime.now()
+
+    def release_mail(self, user):
+        """
+            Unhold mail for the user
+        """
+        pass
 
     def check_limits(self, request):
         """
@@ -115,22 +152,25 @@ class UFC():
         """
         action = 'DUNNO'
         sender = request['sender']
-        if sender.endswith("@ull.es"):
+
+        if self.is_banned(sender):
+            log.debug("Intento de envío de correo de un usuario baneado: %s" % sender)
+            action = self.hold
+        else:
             time = request['request_time'] - datetime.timedelta(seconds = self.max_time)
             sended_emails = Log.select(Log.q.sender == sender).filter(Log.q.request_time > time).count()
             if sended_emails >= self.max_email:
-                sendMail(
-                    'Control de flujo de correo en %s' % self.fqdn,
-                    'El usuario %s ha pretendido enviar en %s segundos más de %s mensajes.' % (sender, self.max_time, self.max_email),
-                    self.smtp_server,
-                    self.tls_required,
-                    self.recipients,
-                    sender
-                )
-                action = 'HOLD bloqueado por el control de flujo. Demasiados mensajes enviados en los ultimos %s segundos.' % self.max_time
-                log.warn("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
+                log.info("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
                     (sender, sended_emails, self.max_time))
+                action = self.hold
+                self.ban_user(sender)
+
         return action
+
+    def check(self, lines):
+        request = dict([line.split('=', 1) for line in lines if line])
+        self.append_to_log(request)
+        return self.check_limits(request)
 
     def purge(self):
         log.info("Expirando entradas antiguas en el Log")
@@ -159,8 +199,7 @@ class UFC():
     def process(self):
         if self.interactive:
             lines = self.read_lines_from_stdin()
-            request = self.append_to_log(lines)
-            print "action=%s\n" % self.check_limits(request)
+            print "action=%s\n" % self.check(lines)
         else:
             import server
             server.start(self)
@@ -169,6 +208,9 @@ def main(options, interactive = False):
     ufc = UFC(options.verbose, interactive)
     if options.purge:
         ufc.purge()
+    elif options.release_user:
+        ufc.unban_user(options.release_user)
+        ufc.release_mail(options.release_user)
     else:
         ufc.process()
 
@@ -178,9 +220,10 @@ if __name__ == "__main__":
         parser.add_option("-p", "--purge", dest="purge", action="store_true", help="Purge log database (implies --no-daemon)", default=False)
         parser.add_option("-v", "--verbose", dest="verbose", action="store_true", help="Verbose", default=False)
         parser.add_option("-n", "--no-daemon", dest="no_daemon", action="store_true", help="No daemonize", default=False)
+        parser.add_option("-r", "--release", dest="release_user", help="Unban user and release mail in hold from the user (implies --no-daemon)")
         options, args = parser.parse_args()
 
-        if options.no_daemon or options.purge:
+        if options.no_daemon or options.purge or options.release_user:
             main(options, interactive = True)
         else:
             with daemon.DaemonContext():

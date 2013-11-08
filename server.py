@@ -4,6 +4,7 @@ from twisted.internet.protocol import ServerFactory
 from twisted.internet import reactor, threads
 from twisted.protocols import basic, policies
 from twisted.internet.defer import Deferred
+from twisted.internet.error import ConnectionLost
 import time
 
 import logging
@@ -22,19 +23,17 @@ class UFCProtocol(basic.LineReceiver, policies.TimeoutMixin):
     
     def connectionMade(self):
         self.setTimeout(self.timeout)
-        try:
-            self._peer_ip, self._peer_port = self.transport.getHandle().getpeername()
-        except:
-            self._peer_ip, self._peer_port = None, None
-        log.debug('Connect from [%s]:%s' % (self._peer_ip, self._peer_port))
+        log.debug('Connect from %s' % self.transport.getPeer())
 
     def connectionLost(self, reason):
-        log.debug('Disconnect from [%s]:%s; %s' % (self._peer_ip, self._peer_port, reason))
+        if reason.type != ConnectionLost:
+            log.debug('Disconnect from %s' % self.transport.getPeer())
+        else:
+            log.error('Disconnect from %s: %s' % (self.transport.getPeer(), reason))
 
     def lineReceived(self, line):
         self.resetTimeout()
 
-        #log.debug('lineReceived: "%s"' % line)
         if line:
             self._buffer.append(line)
         else:
@@ -70,8 +69,7 @@ class UFCFactory(ServerFactory):
         self.ufc = ufc
 
     def check(self, lines):
-        request = self.ufc.append_to_log(lines)
-        return self.ufc.check_limits(request)
+        return self.ufc.check(lines)
 
 def start(ufc):
     port = reactor.listenTCP(9000, UFCFactory(ufc))

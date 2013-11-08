@@ -6,6 +6,11 @@ import smtplib
 import logging
 log = logging.getLogger('ufc')
 
+msg_tpl = """Content-Type: text/plain; charset="utf-8"
+Subject: %s
+
+%s
+"""
 def fatal_error(msg = None):
     if msg is not None:
         log.error(msg)
@@ -14,11 +19,12 @@ def fatal_error(msg = None):
 
 def sendMail(subject, body, smtp_server, tls_required, recipients, sender):
     log.debug('Enviando correo a %s' % recipients)
-    msg = 'Subject: %s\r\n%s' % (subject, body)
 
     session = smtplib.SMTP(smtp_server)
     if tls_required:
         session.starttls()
+
+    msg = msg_tpl % (subject, body)
     smtpresult = session.sendmail(sender, recipients, msg)
     if smtpresult:
         errstr = ""
