@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 
 from twisted.internet.protocol import ServerFactory
-from twisted.internet import reactor
+from twisted.internet import reactor, threads
 from twisted.protocols import basic, policies
+from twisted.internet.defer import Deferred
 import time
 
 import logging
@@ -33,7 +34,7 @@ class UFCProtocol(basic.LineReceiver, policies.TimeoutMixin):
     def lineReceived(self, line):
         self.resetTimeout()
 
-        log.debug('lineReceived: "%s"' % line)
+        #log.debug('lineReceived: "%s"' % line)
         if line:
             self._buffer.append(line)
         else:
@@ -42,11 +43,19 @@ class UFCProtocol(basic.LineReceiver, policies.TimeoutMixin):
 
     def _process_request(self):
         log.debug('Processing request: %s' % self._buffer)
-        request = self.factory.ufc.append_to_log(self._buffer)
-        action = self.factory.ufc.check_limits(request)
-        self.send_action(action)
+        # Run check in a thread so database access don't block our twisted reactor
+        d = threads.deferToThread(self.factory.check, self._buffer)
+        d.addCallback(self._callback)
+        d.addErrback(self._errback)
 
-    def send_action(self, action):
+    def _callback(self, action):
+        self._send_action(action)
+
+    def _errback(self, reason):
+        log.error("Processing request error: %s" % reason)
+        self._send_action('DUNNO')
+
+    def _send_action(self, action):
         answer = "action=%s" % action
         log.debug("send_action: %s" % answer)
         self.sendLine(answer)
@@ -59,6 +68,10 @@ class UFCFactory(ServerFactory):
 
     def __init__(self, ufc):
         self.ufc = ufc
+
+    def check(self, lines):
+        request = self.ufc.append_to_log(lines)
+        return self.ufc.check_limits(request)
 
 def start(ufc):
     port = reactor.listenTCP(9000, UFCFactory(ufc))

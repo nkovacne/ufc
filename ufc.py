@@ -24,7 +24,7 @@ import logging
 log = logging.getLogger('ufc')
 log.setLevel(logging.INFO)
 from logging.handlers import SysLogHandler
-syslog = SysLogHandler('/dev/log')
+syslog = SysLogHandler('/dev/log', facility = SysLogHandler.LOG_MAIL)
 syslog.setFormatter(logging.Formatter('%(name)s: %(levelname)s %(message)s'))
 log.addHandler(syslog)
 
