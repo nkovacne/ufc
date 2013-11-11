@@ -37,6 +37,8 @@ syslog = SysLogHandler('/dev/log', facility = SysLogHandler.LOG_MAIL)
 syslog.setFormatter(logging.Formatter('%(name)s: %(levelname)s %(message)s'))
 log.addHandler(syslog)
 
+config_path = '/etc/ufc.cfg'
+
 mail_tpl = """
 El usuario %s ha pretendido enviar en %s segundos más de %s mensajes.
 La actividad se ha detectado en la máquina %s.
@@ -51,14 +53,15 @@ class UFC():
     fqdn = socket.getfqdn()
     tls_required = True
 
+    listen_tcp = True
     hold = 'HOLD bloqueado por el control de flujo.'
 
     def __init__(self, verbose = False, interactive = False):
         config = ConfigParser.ConfigParser()
         try:
-            config.read('/etc/ufc.cfg')
+            config.read(config_path)
         except IOError:
-            fatal_error(u'Error leyendo la configuración')
+            fatal_error('Error reading configuration from %s' % config_path)
 
         #log_filename = self.get_config(config, 'log', 'filename')
         #log.addHandler(logging.FileHandler(log_filename))
@@ -77,7 +80,7 @@ class UFC():
         try:
             connection = connectionForURI(connection_string)
         except Exception, e:
-            fatal_error(u'Cadena de conexión incorrecta: %s. Error: %s' % (connection_string, e))
+            fatal_error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
 
         sqlhub.processConnection = connection
         Log.createTable(ifNotExists = True)
@@ -214,12 +217,12 @@ class UFC():
         return lines
 
     def process(self):
-        if self.interactive:
-            lines = self.read_lines_from_stdin()
-            print "action=%s\n" % self.check(lines)
-        else:
+        if self.listen_tcp:
             import server
             server.start(self)
+        else:
+            lines = self.read_lines_from_stdin()
+            print "action=%s\n" % self.check(lines)
 
 def main(options, interactive = False):
     ufc = UFC(options.verbose, interactive)
