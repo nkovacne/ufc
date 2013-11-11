@@ -5,8 +5,9 @@ ULL Flow Control
 
 Requisitos:
 
-  * python (probado con 2.4)
+  * python
   * python-sqlobject
+  * python-twisted
 
 Configuración rápida:
 
