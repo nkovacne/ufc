@@ -6,6 +6,15 @@
 # Con esta información se pretende poder controlar el flujo de mensajes
 # salientes de postfix.
 #
+#
+# TODO
+#  - Implementar un decorador needs_root que verifique si el usuario que ejecuta
+#    el script es root (necesario para ejecutar postsuper).
+#
+# FIXME
+#  - Aunque se libere un baneo se sigue comprobando si el usuario ha superado el
+#    límite configurado. Este límite no hay modo de saltárselo.
+#
 
 import daemon
 import datetime
@@ -106,7 +115,7 @@ class UFC():
         return Log(**request)
 
     def is_banned(self, user):
-        bans = Ban.select(Log.q.sender == user).\
+        bans = Ban.select(Ban.q.sender == user).\
             filter(OR(Ban.q.expires_at == None, Ban.q.expires_at > datetime.datetime.now()))
         if not bans.count():
             return False
@@ -133,12 +142,20 @@ class UFC():
             log.warning("The user %s doesn't have bans to release" % user)
         else:
             log.info("Releasing %s bans for user %s" % (bans.count(), user))
+            now = datetime.datetime.now()
             for b in bans:
-                b.expires_at = datetime.datetime.now()
+                log.debug("Setting expire time to %s to the ban created at %s in %s" % (now, b.created, b.host))
+                b.expires_at = now
 
     def release_mail(self, user):
         """
-            Unhold mail for the user
+            Unhold mail from the user
+        """
+        pass
+
+    def remove_mail(self, user):
+        """
+            Remove mail from the user
         """
         pass
 
@@ -208,9 +225,12 @@ def main(options, interactive = False):
     ufc = UFC(options.verbose, interactive)
     if options.purge:
         ufc.purge()
-    elif options.release_user:
-        ufc.unban_user(options.release_user)
-        ufc.release_mail(options.release_user)
+    elif options.unban_email:
+        ufc.unban_user(options.unban_email)
+        if options.release:
+            ufc.release_mail(options.unban_email)
+        elif options.remove:
+            ufc.remove_mail(options.unban_email)
     else:
         ufc.process()
 
@@ -220,10 +240,17 @@ if __name__ == "__main__":
         parser.add_option("-p", "--purge", dest="purge", action="store_true", help="Purge log database (implies --no-daemon)", default=False)
         parser.add_option("-v", "--verbose", dest="verbose", action="store_true", help="Verbose", default=False)
         parser.add_option("-n", "--no-daemon", dest="no_daemon", action="store_true", help="No daemonize", default=False)
-        parser.add_option("-r", "--release", dest="release_user", help="Unban user and release mail in hold from the user (implies --no-daemon)")
+        parser.add_option("--unban", dest="unban_email", help="Unban email (implies --no-daemon)")
+        parser.add_option("--release", dest="release", help="Release mail from hold sent by unbanned user")
+        parser.add_option("--remove", dest="remove", help="Remove mail from hold sent by unbanned user")
         options, args = parser.parse_args()
 
-        if options.no_daemon or options.purge or options.release_user:
+        interactive = \
+            options.no_daemon or \
+            options.purge or \
+            options.unban_email
+
+        if interactive:
             main(options, interactive = True)
         else:
             with daemon.DaemonContext():
