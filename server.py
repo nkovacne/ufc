@@ -78,7 +78,7 @@ class UFCFactory(ServerFactory):
         return self.ufc.check(lines)
 
 def start(ufc):
-    port = reactor.listenTCP(9000, UFCFactory(ufc))
+    port = reactor.listenTCP(9000, UFCFactory(ufc), interface='127.0.0.1')
     log.info('Listening on %s' % port.getHost())
     reactor.run()
 
