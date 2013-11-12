@@ -1,4 +1,4 @@
 python-daemon
 sqlobject
-twisted==11.1.0
+twisted
 psycopg2

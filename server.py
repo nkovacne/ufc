@@ -11,6 +11,10 @@ import signal
 import logging
 log = logging.getLogger('ufc')
 
+import twisted.python.log
+import sys
+twisted.python.log.startLogging(sys.stdout)
+
 class UFCProtocol(basic.LineReceiver, policies.TimeoutMixin):
     """
         This is an implementation of Postfix policy protocol
@@ -20,7 +24,7 @@ class UFCProtocol(basic.LineReceiver, policies.TimeoutMixin):
     delimiter = '\n'
 
     def __init__(self):
-        self._buffer = []
+        self._request = []
     
     def connectionMade(self):
         self.setTimeout(self.timeout)
@@ -36,15 +40,15 @@ class UFCProtocol(basic.LineReceiver, policies.TimeoutMixin):
         self.resetTimeout()
 
         if line:
-            self._buffer.append(line)
+            self._request.append(line)
         else:
             self._process_request()
-            self._buffer = []
+            self._request = []
 
     def _process_request(self):
-        log.debug('Processing request: %s' % self._buffer)
+        log.debug('Processing request: %s' % self._request)
         # Run check in a thread so database access don't block our twisted reactor
-        d = threads.deferToThread(self.factory.check, self._buffer)
+        d = threads.deferToThread(self.factory.check, self._request)
         d.addCallback(self._callback)
         d.addErrback(self._errback)
 
@@ -70,9 +74,13 @@ class UFCFactory(ServerFactory):
         self.ufc = ufc
 
         signal.signal(signal.SIGHUP, self._sighup_handler)
+        signal.signal(signal.SIGUSR1, self._sigusr1_handler)
 
     def _sighup_handler(self, signum, frame):
         self.ufc.configure()
+
+    def _sigusr1_handler(self, signum, frame):
+        reactor.getThreadPool().dumpStats()
 
     def check(self, lines):
         return self.ufc.check(lines)
