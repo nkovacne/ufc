@@ -6,6 +6,7 @@ from twisted.protocols import basic, policies
 from twisted.internet.defer import Deferred
 from twisted.internet.error import ConnectionLost
 import time
+import signal
 
 import logging
 log = logging.getLogger('ufc')
@@ -67,6 +68,11 @@ class UFCFactory(ServerFactory):
 
     def __init__(self, ufc):
         self.ufc = ufc
+
+        signal.signal(signal.SIGHUP, self._sighup_handler)
+
+    def _sighup_handler(self, signum, frame):
+        self.ufc.configure()
 
     def check(self, lines):
         return self.ufc.check(lines)

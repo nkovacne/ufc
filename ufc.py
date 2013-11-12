@@ -53,22 +53,24 @@ class UFC():
     fqdn = socket.getfqdn()
     tls_required = True
 
-    listen_tcp = True
     hold = 'HOLD bloqueado por el control de flujo.'
 
-    def __init__(self, verbose = False, interactive = False):
+    def __init__(self, verbose = False, listen_tcp = True):
+        if verbose:
+            log.setLevel(logging.DEBUG)
+        self.listen_tcp = listen_tcp
+        self.configure()
+
+    def configure(self):
         config = ConfigParser.ConfigParser()
         try:
             config.read(config_path)
         except IOError:
-            fatal_error('Error reading configuration from %s' % config_path)
+            log.error('Error reading configuration from %s' % config_path)
+            return False
 
-        #log_filename = self.get_config(config, 'log', 'filename')
-        #log.addHandler(logging.FileHandler(log_filename))
-        if verbose:
-            log.setLevel(logging.DEBUG)
+        log.info("Reading configuration from %s" % config_path)
 
-        self.interactive = interactive
         self.smtp_server = self.get_config(config, 'smtp', 'server', self.smtp_server)
         self.recipients = self.get_config(config, 'smtp', 'recipients', self.recipients)
         if type(self.recipients) == str:
@@ -80,11 +82,14 @@ class UFC():
         try:
             connection = connectionForURI(connection_string)
         except Exception, e:
-            fatal_error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
+            log.error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
+            return False
 
         sqlhub.processConnection = connection
         Log.createTable(ifNotExists = True)
         Ban.createTable(ifNotExists = True)
+
+        return True
 
     def get_config(self, config, section, option, default = None):
         log.debug("Reading [%s]:%s from config" % (section, option))
@@ -224,8 +229,8 @@ class UFC():
             lines = self.read_lines_from_stdin()
             print "action=%s\n" % self.check(lines)
 
-def main(options, interactive = False):
-    ufc = UFC(options.verbose, interactive)
+def main(options):
+    ufc = UFC(options.verbose, not options.stdin)
     if options.purge:
         ufc.purge()
     elif options.unban_email:
@@ -240,24 +245,20 @@ def main(options, interactive = False):
 if __name__ == "__main__":
     try:
         parser = OptionParser()
-        parser.add_option("-p", "--purge", dest="purge", action="store_true", help="Purge log database (implies --no-daemon)", default=False)
+        parser.add_option("-p", "--purge", dest="purge", action="store_true", help="Purge log database", default=False)
         parser.add_option("-v", "--verbose", dest="verbose", action="store_true", help="Verbose", default=False)
-        parser.add_option("-n", "--no-daemon", dest="no_daemon", action="store_true", help="No daemonize", default=False)
+        parser.add_option("-d", "--daemon", dest="daemon", action="store_true", help="Daemonize", default=False)
+        parser.add_option("-s", "--stdin", dest="stdin", action="store_true", help="Read input from STDIN (no listen TCP)", default=False)
         parser.add_option("--unban", dest="unban_email", help="Unban email (implies --no-daemon)")
         parser.add_option("--release", dest="release", help="Release mail from hold sent by unbanned user")
         parser.add_option("--remove", dest="remove", help="Remove mail from hold sent by unbanned user")
         options, args = parser.parse_args()
 
-        interactive = \
-            options.no_daemon or \
-            options.purge or \
-            options.unban_email
-
-        if interactive:
-            main(options, interactive = True)
-        else:
+        if options.daemon:
             with daemon.DaemonContext():
                 main(options)
+        else:
+            main(options)
 
     except Exception, e:
         fp = StringIO()
