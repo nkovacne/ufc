@@ -8,12 +8,12 @@ from twisted.internet.error import ConnectionLost
 import time
 import signal
 
+import twisted.python.log
+observer = twisted.python.log.PythonLoggingObserver('ufc')
+observer.start()
+
 import logging
 log = logging.getLogger('ufc')
-
-import twisted.python.log
-import sys
-twisted.python.log.startLogging(sys.stdout)
 
 class UFCProtocol(basic.LineReceiver, policies.TimeoutMixin):
     """
@@ -78,6 +78,11 @@ class UFCFactory(ServerFactory):
 
     def _sighup_handler(self, signum, frame):
         self.ufc.configure()
+        # Si hemos cambiado la configuración de base de datos debemos abrir
+        # de nuevo todas las conexiones.
+        log.info("Restarting threadpool...")
+        reactor.getThreadPool().stop()
+        reactor.getThreadPool().start()
 
     def _sigusr1_handler(self, signum, frame):
         reactor.getThreadPool().dumpStats()
