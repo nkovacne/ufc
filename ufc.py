@@ -206,7 +206,7 @@ class UFC():
             Las acciones que podemos ordenar son todas las que se pueden poner en un access map:
             http://www.postfix.org/access.5.html
         """
-        sender = self.get_sender(req)
+        sender = self.get_sender(request)
 
         log.info("[%s] - %s - %s => %s" % (
             request['request_time'], request['client_address'], \
