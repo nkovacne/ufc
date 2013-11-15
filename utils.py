@@ -37,3 +37,6 @@ El servidor ha dicho: %s
 %s""" % (recip, smtpresult[recip][0], smtpresult[recip][1], errstr)
         raise smtplib.SMTPException, errstr
 
+def str_to_list(s):
+    return [ i.strip() for i in s.split(',') if i ]
+

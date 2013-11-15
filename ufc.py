@@ -27,7 +27,7 @@ from cStringIO import StringIO
 import traceback
 from sqlobject import sqlhub, connectionForURI
 from models import Log, Ban, OR
-from utils import fatal_error, sendMail
+from utils import fatal_error, sendMail, str_to_list
 
 import logging
 log = logging.getLogger('ufc')
@@ -47,13 +47,23 @@ La actividad se ha detectado en la máquina %s.
 class UFC():
     "ULL Flow Control"
 
+    # Únicamente tenemos en cuenta correos cuyo remitente sea de nuestro dominio
+    only_from_domain = True
+
+    # Lista de usuarios a los que no se le aplica este filtro
+    whitelist = []
+
+    # Mensajes de respuesta
+    ans = 'El usuario ha superado el limite de correos enviados por minuto'
+    hold = "HOLD %s" % ans
+    reject = "REJECT %s" % ans
+    dunno = "DUNNO"
+    
     # Configuración del correo
     smtp_server = 'localhost'
     recipients = ['root', ]
     fqdn = socket.getfqdn()
     tls_required = True
-
-    hold = 'HOLD bloqueado por el control de flujo.'
 
     def __init__(self, verbose = False, listen_tcp = True):
         if verbose:
@@ -74,9 +84,24 @@ class UFC():
         self.smtp_server = self.get_config(config, 'smtp', 'server', self.smtp_server)
         self.recipients = self.get_config(config, 'smtp', 'recipients', self.recipients)
         if type(self.recipients) == str:
-            self.recipients = self.recipients.split(',')
+            self.recipients = str_to_list(self.recipients)
+
+        # Limits configuration
         self.max_time = int(self.get_config(config, 'limits', 'max_time'))
         self.max_email = int(self.get_config(config, 'limits', 'max_email'))
+
+        self.domain = self.get_config(config, 'limits', 'domain')
+        if self.domain is None:
+            try:
+                self.domain = self.fqdn.split('.', 1)[1]
+            except IndexError:
+                self.domain = 'localdomain'
+        log.info("Domain: %s " % self.domain)
+
+        self.whitelist = self.get_config(config, 'limits', 'whitelist', self.whitelist)
+        if type(self.whitelist) == str:
+            self.whitelist = str_to_list(self.whitelist)
+        log.info("Whitelist: %s " % self.whitelist)
 
         connection_string = self.get_config(config, 'database', 'connection_string')
         try:
@@ -115,10 +140,6 @@ class UFC():
 
         request['request_time'] = datetime.datetime.now()
         request['expiresAt'] = request['request_time'] + datetime.timedelta(weeks=1)
-
-        log.info(u"[%s] - %s - %s => %s" % (
-            request['request_time'], request['client_address'], \
-            request['sender'], request['recipient']))
 
         return Log(**request)
 
@@ -167,6 +188,16 @@ class UFC():
         """
         pass
 
+    def get_sender(self, req):
+        if req['sasl_username']:
+            if req['sasl_username'].find('@') == -1:
+                sender = "%s@%s" % (req['sasl_username'].lower(), self.domain)
+            else:
+                sender = req['sasl_username'].lower()
+            log.debug("Using sasl_username as sender: %s" % sender)
+            return sender
+        return req['sender'].lower()
+
     def check_limits(self, request):
         """
             Con la información que nos manda postfix que tenemos en request tenemos que
@@ -175,27 +206,41 @@ class UFC():
             Las acciones que podemos ordenar son todas las que se pueden poner en un access map:
             http://www.postfix.org/access.5.html
         """
-        action = 'DUNNO'
-        sender = request['sender']
+        sender = self.get_sender(req)
+
+        log.info("[%s] - %s - %s => %s" % (
+            request['request_time'], request['client_address'], \
+            sender, request['recipient']))
+
+        if sender in self.whitelist:
+            log.debug("%s address is in whitelist, ignoring", sender)
+            return self.dunno
+
+        if self.only_from_domain and \
+           self.domain and \
+           not sender.endswith(self.domain):
+            # No es de nuestro dominio
+            log.debug("%s address is not from domain %s, ignoring", sender, self.domain)
+            return self.dunno
 
         if self.is_banned(sender):
             log.debug("Intento de envío de correo de un usuario baneado: %s" % sender)
-            action = self.hold
-        else:
-            time = request['request_time'] - datetime.timedelta(seconds = self.max_time)
-            sended_emails = Log.select(Log.q.sender == sender).filter(Log.q.request_time > time).count()
-            if sended_emails >= self.max_email:
-                log.info("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
-                    (sender, sended_emails, self.max_time))
-                action = self.hold
-                self.ban_user(sender)
+            return self.hold
 
-        return action
+        time = request['request_time'] - datetime.timedelta(seconds = self.max_time)
+        sended_emails = Log.select(Log.q.sender == sender).filter(Log.q.request_time > time).count()
+        if sended_emails < self.max_email:
+            return self.dunno
+
+        log.info("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
+            (sender, sended_emails, self.max_time))
+        self.ban_user(sender)
+        return self.hold
 
     def check(self, lines):
-        request = dict([line.split('=', 1) for line in lines if line])
-        self.append_to_log(request)
-        return self.check_limits(request)
+        req = dict([line.split('=', 1) for line in lines if line])
+        self.append_to_log(req)
+        return self.check_limits(req)
 
     def purge(self):
         log.info("Expirando entradas antiguas en el Log")
