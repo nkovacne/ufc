@@ -28,6 +28,7 @@ import traceback
 from sqlobject import sqlhub, connectionForURI
 from models import Log, Ban, OR
 from utils import fatal_error, sendMail, str_to_list
+import postfix
 
 import logging
 log = logging.getLogger('ufc')
