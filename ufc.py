@@ -168,9 +168,13 @@ class UFC():
     def unban_user(self, user):
         bans = self.is_banned(user)
         if not bans:
-            log.warning("The user %s doesn't have bans to release" % user)
+            msg = "The user %s doesn't have bans to release" % user
+            print msg
+            log.warning(msg)
         else:
-            log.info("Releasing %s bans for user %s" % (bans.count(), user))
+            msg = "Releasing %s bans for user %s" % (bans.count(), user)
+            print msg
+            log.info(msg)
             now = datetime.datetime.now()
             for b in bans:
                 log.debug("Setting expire time to %s to the ban created at %s in %s" % (now, b.created, b.host))
