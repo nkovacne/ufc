@@ -24,7 +24,7 @@ def status2queue(status):
         return status_map[status]
     return DEFERRED_QUEUE
 
-def mailq(sender = None, status = None):
+def mailq(sender = None, queue = None):
     r = re.compile(r"""^
                        (?P<queue_id>\w+)(?P<status>[!*]?)\s+
                        (?P<size>\d+)\s+
@@ -35,13 +35,13 @@ def mailq(sender = None, status = None):
         m = r.match(line)
         if m:
             msg = {
-                'status': status2queue(m.group('status')),
+                'queue': status2queue(m.group('status')),
                 'size': m.group('size'),
                 'date': m.group('date'),
                 'sender': m.group('sender'),
                 }
             if (not sender or sender == msg['sender']) and \
-               (not status or status == msg['status']):
+               (not queue or queue == msg['queue']):
                 msgs[m.group('queue_id')] = msg
     return msgs
 

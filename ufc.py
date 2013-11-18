@@ -184,13 +184,15 @@ class UFC():
         """
             Unhold mail from the user
         """
-        pass
+        msgs = postfix.mailq(sender = user, queue = postfix.HOLD_QUEUE)
+        postfix.release_mail(msgs.keys())
 
     def remove_mail(self, user):
         """
             Remove mail from the user
         """
-        pass
+        msgs = postfix.mailq(sender = user, queue = postfix.HOLD_QUEUE)
+        postfix.remove_mail(msgs.keys())
 
     def get_sender(self, req):
         if req['sasl_username']:
