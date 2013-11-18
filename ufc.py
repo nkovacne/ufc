@@ -133,13 +133,23 @@ class UFC():
                 return default
             fatal_error('Error: %s' % e)
 
+    def get_sender(self, req):
+        if req['sasl_username']:
+            if req['sasl_username'].find('@') == -1:
+                sender = "%s@%s" % (req['sasl_username'].lower(), self.domain)
+            else:
+                sender = req['sasl_username'].lower()
+            log.debug("Using sasl_username as sender: %s" % sender)
+            return sender
+        return req['sender'].lower()
+
     def append_to_log(self, request):
-        for attrib in ('recipient_count', 'size', 'encryption_keysize'):
-            if request[attrib] is not None:
-                request[attrib] = int(request[attrib])
+        if request['size'] is not None:
+            request['size'] = int(request['size'])
 
         request['request_time'] = datetime.datetime.now()
         request['expiresAt'] = request['request_time'] + datetime.timedelta(weeks=1)
+        request['real_sender'] = self.get_sender(request)
 
         return Log(**request)
 
@@ -194,16 +204,6 @@ class UFC():
         msgs = postfix.mailq(sender = user, queue = postfix.HOLD_QUEUE)
         postfix.remove_mail(msgs.keys())
 
-    def get_sender(self, req):
-        if req['sasl_username']:
-            if req['sasl_username'].find('@') == -1:
-                sender = "%s@%s" % (req['sasl_username'].lower(), self.domain)
-            else:
-                sender = req['sasl_username'].lower()
-            log.debug("Using sasl_username as sender: %s" % sender)
-            return sender
-        return req['sender'].lower()
-
     def check_limits(self, request):
         """
             Con la información que nos manda postfix que tenemos en request tenemos que
@@ -212,7 +212,7 @@ class UFC():
             Las acciones que podemos ordenar son todas las que se pueden poner en un access map:
             http://www.postfix.org/access.5.html
         """
-        sender = self.get_sender(request)
+        sender = request['real_sender']
 
         log.info("[%s] - %s - %s => %s" % (
             request['request_time'], request['client_address'], \
@@ -234,7 +234,7 @@ class UFC():
             return self.hold
 
         time = request['request_time'] - datetime.timedelta(seconds = self.max_time)
-        sended_emails = Log.select(Log.q.sender == sender).filter(Log.q.request_time > time).count()
+        sended_emails = Log.select(Log.q.real_sender == sender).filter(Log.q.request_time > time).count()
         if sended_emails < self.max_email:
             return self.dunno
 
@@ -244,7 +244,10 @@ class UFC():
         return self.hold
 
     def check(self, lines):
+        # Convertimos la entrada en un diccionario
         req = dict([line.split('=', 1) for line in lines if line])
+        # Nos quedamos únicamente con los campos definidos en el modelo Log
+        req = dict([(k, req[k]) for k in req.keys() if hasattr(Log, k)])
         self.append_to_log(req)
         return self.check_limits(req)
 
@@ -301,8 +304,8 @@ if __name__ == "__main__":
         parser.add_option("-d", "--daemon", dest="daemon", action="store_true", help="Daemonize", default=False)
         parser.add_option("-s", "--stdin", dest="stdin", action="store_true", help="Read input from STDIN (no listen TCP)", default=False)
         parser.add_option("--unban", dest="unban_email", help="Unban email (implies --no-daemon)")
-        parser.add_option("--release", dest="release", help="Release mail from hold sent by unbanned user")
-        parser.add_option("--remove", dest="remove", help="Remove mail from hold sent by unbanned user")
+        parser.add_option("--release", dest="release", action="store_true", help="Release mail from hold sent by unbanned user", default=False)
+        parser.add_option("--remove", dest="remove", action="store_true", help="Remove mail from hold sent by unbanned user", default=False)
         options, args = parser.parse_args()
 
         if options.daemon:
