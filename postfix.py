@@ -31,18 +31,28 @@ def mailq(sender = None, queue = None):
                        (?P<date>.{19})\s+
                        (?P<sender>\S+)""", re.X)
     msgs = {}
-    for line in subprocess.check_output([mailq_cmd]).splitlines():
-        m = r.match(line)
-        if m:
-            msg = {
-                'queue': status2queue(m.group('status')),
-                'size': m.group('size'),
-                'date': m.group('date'),
-                'sender': m.group('sender'),
-                }
-            if (not sender or sender == msg['sender']) and \
-               (not queue or queue == msg['queue']):
-                msgs[m.group('queue_id')] = msg
+    log.debug("Invoking %s" % mailq_cmd)
+    # This is the same that:
+    #  for line in subprocess.check_output([mailq_cmd]).splitlines():
+    # But in python2.6 we don't have check_output() method
+    p = subprocess.Popen([mailq_cmd], stdout=subprocess.PIPE)
+    output, error = p.communicate()
+    retcode = p.poll()
+    if retcode:
+        log.error('Error executing %s: rc: %d, error: %s' % (mailq_cmd, retcode, error))
+    else:
+        for line in output.splitlines():
+            m = r.match(line)
+            if m:
+                msg = {
+                    'queue': status2queue(m.group('status')),
+                    'size': m.group('size'),
+                    'date': m.group('date'),
+                    'sender': m.group('sender'),
+                    }
+                if (not sender or sender == msg['sender']) and \
+                   (not queue or queue == msg['queue']):
+                    msgs[m.group('queue_id')] = msg
     return msgs
 
 def release_mail(queue_ids):
