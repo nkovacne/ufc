@@ -1,4 +1,4 @@
 python-daemon
-sqlobject
+SQLAlchemy
 twisted
 psycopg2

@@ -25,8 +25,9 @@ import socket
 from optparse import OptionParser
 from cStringIO import StringIO
 import traceback
-from sqlobject import sqlhub, connectionForURI
-from models import Log, Ban, OR
+from sqlalchemy import create_engine, exc, or_
+from sqlalchemy.orm import sessionmaker
+from models import metadata, Ban, Log
 from utils import fatal_error, sendMail, str_to_list
 import postfix
 
@@ -106,14 +107,15 @@ class UFC():
 
         connection_string = self.get_config(config, 'database', 'connection_string')
         try:
-            connection = connectionForURI(connection_string)
+            connection = create_engine(connection_string, pool_recycle=1750)
         except Exception, e:
             log.error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
             return False
 
-        sqlhub.processConnection = connection
-        Log.createTable(ifNotExists = True)
-        Ban.createTable(ifNotExists = True)
+        metadata.create_all(connection, checkfirst=True)
+
+        Session = sessionmaker(bind=connection)
+        self.session = Session()
 
         return True
 
@@ -134,6 +136,17 @@ class UFC():
                 return default
             fatal_error('Error: %s' % e)
 
+    def dbcommit(self):
+        try:
+            self.session.commit()
+        except exc.ResourceClosedError:
+            log.info("Conexion perdida con la BD, reconectando...")
+        except exc.InvalidRequestError:
+            # Ante algunos errores de conexion a BD, hay que llamar rollback explicitamente antes
+            # de poder escribir a la BD
+            log.info("InvalidRequestError: Ejecutando rollback previo commit()")
+            self.session.rollback()
+
     def get_sender(self, req):
         if req['sasl_username']:
             if req['sasl_username'].find('@') == -1:
@@ -152,21 +165,22 @@ class UFC():
         request['expiresAt'] = request['request_time'] + datetime.timedelta(weeks=1)
         request['real_sender'] = self.get_sender(request)
 
-        return Log(**request)
+        logentry = Log(request)
+        self.session.add(logentry)
+        self.dbcommit()
 
     def is_banned(self, user):
-        bans = Ban.select(Ban.q.sender == user).\
-            filter(OR(Ban.q.expires_at == None, Ban.q.expires_at > datetime.datetime.now()))
+        bans = self.session.query(Ban).filter(Ban.sender == user).\
+            filter(or_(Ban.expires_at == None, Ban.expires_at > datetime.datetime.now()))
         if not bans.count():
             return False
         return bans
 
     def ban_user(self, user):
-        Ban(
-            sender = user,
-            created = datetime.datetime.now(),
-            host = self.fqdn
-            )
+        ban = Ban(sender = user, created = datetime.datetime.now(), host = self.fqdn)
+        self.session.add(ban)
+        self.dbcommit()
+
         sendMail(
             'Bloqueado el envío de correo del usuario %s' % user,
             mail_tpl % (user, self.max_time, self.max_email, self.fqdn),
@@ -190,6 +204,7 @@ class UFC():
             for b in bans:
                 log.debug("Setting expire time to %s to the ban created at %s in %s" % (now, b.created, b.host))
                 b.expires_at = now
+                self.dbcommit()
 
     def release_mail(self, user):
         """
@@ -235,12 +250,13 @@ class UFC():
             return self.hold
 
         time = request['request_time'] - datetime.timedelta(seconds = self.max_time)
-        sended_emails = Log.select(Log.q.real_sender == sender).filter(Log.q.request_time > time).count()
-        if sended_emails < self.max_email:
+        sent_emails = self.session.query(Log).filter(Log.real_sender == sender).\
+                      filter(Log.request_time > time).count()
+        if sent_emails < self.max_email:
             return self.dunno
 
         log.info("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
-            (sender, sended_emails, self.max_time))
+            (sender, sent_emails, self.max_time))
         self.ban_user(sender)
         return self.hold
 

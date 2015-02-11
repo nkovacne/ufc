@@ -6,14 +6,14 @@ ULL Flow Control
 Requisitos:
 
   * python
-  * python-sqlobject
+  * SQLAlchemy
   * python-twisted
 
 Configuración rápida:
 
-  * El script necesita una base de datos, si no tienes disponible lo más sencillo es utilizar SQLite.
-  * Editamos la configuración para que se ajuste a la base de datos creada.
+  * El script necesita una base de datos, si no tienes disponible lo más sencillo es utilizar SQLite. El script se encarga de crear la base de datos si no existe.
   * Ponemos el fichero de configuración en /etc/ufc.cfg.
+  * Editamos la configuración para que se ajuste a la base de datos creada.
   * El resto de configuración asume que el script estará en /opt/ccti/correo/ufc.py.
   * En el inicio del propio script también hay parámetros que se deberían adaptar (variables SMTPSERVER y RECIPIENTS).
   * Cambios a realizar en Postfix:
