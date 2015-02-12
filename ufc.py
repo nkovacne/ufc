@@ -107,15 +107,14 @@ class UFC():
 
         connection_string = self.get_config(config, 'database', 'connection_string')
         try:
-            connection = create_engine(connection_string, pool_recycle=1750)
+            connection = create_engine(connection_string, pool_size=10, max_overflow=15, pool_recycle=1750)
         except Exception, e:
             log.error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
             return False
 
         metadata.create_all(connection, checkfirst=True)
 
-        Session = sessionmaker(bind=connection)
-        self.session = Session()
+        self.session = sessionmaker(bind=connection)
 
         return True
 
@@ -136,16 +135,20 @@ class UFC():
                 return default
             fatal_error('Error: %s' % e)
 
-    def dbcommit(self):
+    def dbinsert(self, DBObj):
+        ses = self.session()
+        ses.add(DBObj)
+
         try:
-            self.session.commit()
+            ses.commit()
         except exc.ResourceClosedError:
-            log.info("Conexion perdida con la BD, reconectando...")
+            # Si hay desconexion de la BD pasa por esta excepcion; no hay que hacer nada porque lo
+            # reintenta con otra sesion del pool
+            pass
         except exc.InvalidRequestError:
             # Ante algunos errores de conexion a BD, hay que llamar rollback explicitamente antes
             # de poder escribir a la BD
-            log.info("InvalidRequestError: Ejecutando rollback previo commit()")
-            self.session.rollback()
+            ses.rollback()
 
     def get_sender(self, req):
         if req['sasl_username']:
@@ -166,11 +169,10 @@ class UFC():
         request['real_sender'] = self.get_sender(request)
 
         logentry = Log(request)
-        self.session.add(logentry)
-        self.dbcommit()
+        self.dbinsert(logentry)
 
-    def is_banned(self, user):
-        bans = self.session.query(Ban).filter(Ban.sender == user).\
+    def is_banned(self, user, ses):
+        bans = ses.query(Ban).filter(Ban.sender == user).\
             filter(or_(Ban.expires_at == None, Ban.expires_at > datetime.datetime.now()))
         if not bans.count():
             return False
@@ -178,8 +180,7 @@ class UFC():
 
     def ban_user(self, user):
         ban = Ban(sender = user, created = datetime.datetime.now(), host = self.fqdn)
-        self.session.add(ban)
-        self.dbcommit()
+        self.dbinsert(ban)
 
         sendMail(
             'Bloqueado el envío de correo del usuario %s' % user,
@@ -191,7 +192,8 @@ class UFC():
         )
 
     def unban_user(self, user):
-        bans = self.is_banned(user)
+        ses = self.session()
+        bans = self.is_banned(user, ses)
         if not bans:
             msg = "The user %s doesn't have bans to release" % user
             print msg
@@ -204,7 +206,7 @@ class UFC():
             for b in bans:
                 log.debug("Setting expire time to %s to the ban created at %s in %s" % (now, b.created, b.host))
                 b.expires_at = now
-                self.dbcommit()
+                ses.commit()
 
     def release_mail(self, user):
         """
@@ -245,12 +247,13 @@ class UFC():
             log.debug("%s address is not from domain %s, ignoring", sender, self.domain)
             return self.dunno
 
-        if self.is_banned(sender):
+        ses = self.session()
+        if self.is_banned(sender, ses):
             log.debug("Intento de envío de correo de un usuario baneado: %s" % sender)
             return self.hold
 
         time = request['request_time'] - datetime.timedelta(seconds = self.max_time)
-        sent_emails = self.session.query(Log).filter(Log.real_sender == sender).\
+        sent_emails = ses.query(Log).filter(Log.real_sender == sender).\
                       filter(Log.request_time > time).count()
         if sent_emails < self.max_email:
             return self.dunno
