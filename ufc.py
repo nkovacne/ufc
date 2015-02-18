@@ -273,8 +273,8 @@ class UFC():
 
     def purge(self):
         log.info("Expirando entradas antiguas en el Log")
-        for e in Log.select(Log.q.expiresAt < datetime.datetime.now()):
-            e.destroySelf()
+        ses = self.session()
+        ses.query(Log).filter(Log.expiresAt < datetime.datetime.now()).delete(synchronize_session='fetch')
         return True
 
     def read_line_from_stdin(self):
