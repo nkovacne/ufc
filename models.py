@@ -42,7 +42,7 @@ class Log(object):
         self.sasl_username = valuearr['sasl_username']
         self.size = valuearr['size']
         self.request_time = valuearr['request_time']
-        self.expiresAt = valuearr['expiresAt']
+        self.expires_at = valuearr['expiresAt']
         self.real_sender = valuearr['real_sender']
 
     def __repr__(self):
