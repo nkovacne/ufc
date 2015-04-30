@@ -107,7 +107,7 @@ class UFC():
 
         connection_string = self.get_config(config, 'database', 'connection_string')
         try:
-            connection = create_engine(connection_string, pool_size=10, max_overflow=15, pool_recycle=1750)
+            connection = create_engine(connection_string, pool_size=10, max_overflow=50, pool_recycle=300)
         except Exception, e:
             log.error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
             return False
@@ -149,6 +149,13 @@ class UFC():
             # Ante algunos errores de conexion a BD, hay que llamar rollback explicitamente antes
             # de poder escribir a la BD
             ses.rollback()
+        except exc.TimeoutError:
+            # Cuando llega al tope de sesiones y max_overflow, se puede quedar frito y da timeouts
+            # en cualquier transacción que se quiera hacer.
+            log.warning("Sin conexiones en el pool! La operacion sobre la BD no se pudo realizar.")
+            pass
+        finally:
+            ses.close()
 
     def get_sender(self, req):
         if req['sasl_username']:
@@ -207,6 +214,7 @@ class UFC():
                 log.debug("Setting expire time to %s to the ban created at %s in %s" % (now, b.created, b.host))
                 b.expires_at = now
                 ses.commit()
+        ses.close()
 
     def release_mail(self, user):
         """
@@ -261,6 +269,9 @@ class UFC():
         log.info("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
             (sender, sent_emails, self.max_time))
         self.ban_user(sender)
+
+        ses.close()
+
         return self.hold
 
     def check(self, lines):
@@ -275,6 +286,7 @@ class UFC():
         log.info("Expirando entradas antiguas en el Log")
         ses = self.session()
         ses.query(Log).filter(Log.expires_at < datetime.datetime.now()).delete(synchronize_session='fetch')
+        ses.close()
         return True
 
     def read_line_from_stdin(self):
