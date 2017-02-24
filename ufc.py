@@ -107,7 +107,7 @@ class UFC():
 
         connection_string = self.get_config(config, 'database', 'connection_string')
         try:
-            connection = create_engine(connection_string, pool_size=10, max_overflow=50, pool_recycle=300)
+            connection = create_engine(connection_string, pool_size=10, max_overflow=25, pool_recycle=1750)
         except Exception, e:
             log.error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
             return False
@@ -141,6 +141,7 @@ class UFC():
 
         try:
             ses.commit()
+            ses.close()
         except exc.ResourceClosedError:
             # Si hay desconexion de la BD pasa por esta excepcion; no hay que hacer nada porque lo
             # reintenta con otra sesion del pool
@@ -150,12 +151,12 @@ class UFC():
             # de poder escribir a la BD
             ses.rollback()
         except exc.TimeoutError:
-            # Cuando llega al tope de sesiones y max_overflow, se puede quedar frito y da timeouts
-            # en cualquier transacción que se quiera hacer.
+            # Cuando llega al tope de sesiones y max_overflow, se queda frito y da timeouts
+            # En teoría vuelve a intentarlo tras 30 segundos, así que simplemente hacemos un pass
             log.warning("Sin conexiones en el pool! La operacion sobre la BD no se pudo realizar.")
             pass
-        finally:
-            ses.close()
+
+        ses.close()
 
     def get_sender(self, req):
         if req['sasl_username']:

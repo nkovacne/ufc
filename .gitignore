@@ -39,3 +39,5 @@ ufc.db
 
 # VIM
 *.swp
+
+virtualenv
