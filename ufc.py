@@ -107,7 +107,7 @@ class UFC():
 
         connection_string = self.get_config(config, 'database', 'connection_string')
         try:
-            connection = create_engine(connection_string, pool_size=10, max_overflow=25, pool_recycle=1750)
+            connection = create_engine(connection_string, pool_size=25, max_overflow=25, pool_recycle=1750)
         except Exception, e:
             log.error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
             return False
