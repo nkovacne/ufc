@@ -107,7 +107,7 @@ class UFC():
 
         connection_string = self.get_config(config, 'database', 'connection_string')
         try:
-            connection = create_engine(connection_string, pool_size=25, max_overflow=25, pool_recycle=1750)
+            connection = create_engine(connection_string, pool_size=25, max_overflow=25, pool_recycle=30)
         except Exception, e:
             log.error('Database access error, connection string used: %s. Error: %s' % (connection_string, e))
             return False
@@ -259,12 +259,14 @@ class UFC():
         ses = self.session()
         if self.is_banned(sender, ses):
             log.debug("Intento de envío de correo de un usuario baneado: %s" % sender)
+            ses.close()
             return self.hold
 
         time = request['request_time'] - datetime.timedelta(seconds = self.max_time)
         sent_emails = ses.query(Log).filter(Log.real_sender == sender).\
                       filter(Log.request_time > time).count()
         if sent_emails < self.max_email:
+            ses.close()
             return self.dunno
 
         log.info("Bloqueando correo del usuario %s por enviar %d correos en menos de %d segundos" % \
